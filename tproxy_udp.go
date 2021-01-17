@@ -142,7 +142,7 @@ func DialUDP(network string, laddr *net.UDPAddr, raddr *net.UDPAddr) (*net.UDPCo
 		syscall.Close(fileDescriptor)
 		return nil, &net.OpError{Op: "dial", Err: fmt.Errorf("convert file descriptor to connection: %s", err)}
 	}
-	
+
 	return remoteConn.(*net.UDPConn), nil
 }
 

@@ -193,3 +193,62 @@ func tcpAddrFamily(net string, laddr, raddr *net.TCPAddr) int {
 	}
 	return syscall.AF_INET6
 }
+
+// DialTCP will open a
+// TCP connection to the specified destination
+// with the specified local address.
+func DialTCP(laddr, raddr *net.TCPAddr) (*net.TCPConn, error) {
+	if laddr == nil || raddr == nil {
+		return nil, &net.OpError{Op: "dial", Err: fmt.Errorf("empty local address or remote address")}
+	}
+	remoteSocketAddress, err := tcpAddrToSocketAddr(raddr)
+	if err != nil {
+		return nil, &net.OpError{Op: "dial", Err: fmt.Errorf("build destination socket address: %s", err)}
+	}
+
+	localSocketAddress, err := tcpAddrToSocketAddr(laddr)
+	if err != nil {
+		return nil, &net.OpError{Op: "dial", Err: fmt.Errorf("build local socket address: %s", err)}
+	}
+
+	fileDescriptor, err := syscall.Socket(tcpAddrFamily("tcp", raddr, laddr), syscall.SOCK_STREAM, syscall.IPPROTO_TCP)
+	if err != nil {
+		return nil, &net.OpError{Op: "dial", Err: fmt.Errorf("socket open: %s", err)}
+	}
+
+	if err = syscall.SetsockoptInt(fileDescriptor, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
+		syscall.Close(fileDescriptor)
+		return nil, &net.OpError{Op: "dial", Err: fmt.Errorf("set socket option: SO_REUSEADDR: %s", err)}
+	}
+
+	if err = syscall.SetsockoptInt(fileDescriptor, syscall.SOL_IP, syscall.IP_TRANSPARENT, 1); err != nil {
+		syscall.Close(fileDescriptor)
+		return nil, &net.OpError{Op: "dial", Err: fmt.Errorf("set socket option: IP_TRANSPARENT: %s", err)}
+	}
+
+	if err = syscall.SetNonblock(fileDescriptor, true); err != nil {
+		syscall.Close(fileDescriptor)
+		return nil, &net.OpError{Op: "dial", Err: fmt.Errorf("set socket option: SO_NONBLOCK: %s", err)}
+	}
+
+	if err = syscall.Bind(fileDescriptor, localSocketAddress); err != nil {
+		syscall.Close(fileDescriptor)
+		return nil, &net.OpError{Op: "dial", Err: fmt.Errorf("socket bind: %s", err)}
+	}
+
+	if err = syscall.Connect(fileDescriptor, remoteSocketAddress); err != nil && !strings.Contains(err.Error(), "operation now in progress") {
+		syscall.Close(fileDescriptor)
+		return nil, &net.OpError{Op: "dial", Err: fmt.Errorf("socket connect: %s", err)}
+	}
+
+	fdFile := os.NewFile(uintptr(fileDescriptor), fmt.Sprintf("net-tcp-dial-%s", raddr.String()))
+	defer fdFile.Close()
+
+	remoteConn, err := net.FileConn(fdFile)
+	if err != nil {
+		syscall.Close(fileDescriptor)
+		return nil, &net.OpError{Op: "dial", Err: fmt.Errorf("convert file descriptor to connection: %s", err)}
+	}
+
+	return remoteConn.(*net.TCPConn), nil
+}
