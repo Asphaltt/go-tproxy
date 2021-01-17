@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"go-tproxy"
+	"github.com/Asphaltt/go-tproxy"
 )
 
 var (
